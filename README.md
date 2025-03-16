@@ -5,6 +5,10 @@
 ![회로도](https://github.com/user-attachments/assets/ab77fc50-74ea-4996-94e7-afc7b84a9bfc)
 
 
+## 동작 시연
+
+https://youtu.be/jD3jkI3LD5E
+
 ## 기본 기능  
 - 빨간 LED (2초) → 노란 LED (0.5초) → 초록 LED (2초) → 초록 LED 깜빡임 (3회, 총 1초) 반복  
 
