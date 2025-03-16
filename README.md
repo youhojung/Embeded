@@ -2,7 +2,7 @@
 
 ## 회로도
 
-![회로도]([https://example.com/image.png](https://drive.google.com/file/d/1_zvcbA7KlJ9biH1Tbz2mPJ6VNJL2COFz/view?usp=drive_link))
+![회로도]([https://example.com/image.png](https://drive.google.com/file/d/1_zvcbA7KlJ9biH1Tbz2mPJ6VNJL2COFz/view?usp=drive_link)
 
 ## 기본 기능  
 - 빨간 LED (2초) → 노란 LED (0.5초) → 초록 LED (2초) → 초록 LED 깜빡임 (3회, 총 1초) 반복  
