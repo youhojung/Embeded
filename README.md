@@ -7,7 +7,7 @@
 
 ## 동작 시연
 
-https://youtu.be/jD3jkI3LD5E
+[https://youtu.be/jD3jkI3LD5E](https://youtu.be/dmyctRXx0_g)
 
 ## 기본 기능  
 - 빨간 LED (2초) → 노란 LED (0.5초) → 초록 LED (2초) → 초록 LED 깜빡임 (3회, 총 1초) 반복  
