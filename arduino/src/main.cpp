@@ -1,323 +1,269 @@
 #include <Arduino.h>
 #include <TaskScheduler.h>
+#include <PinChangeInterrupt.h>
 
-#define LED_PIN_RED 13  // 빨간 LED가 연결된 핀
-#define LED_PIN_YELLOW 12  // 노란 LED가 연결된 핀
-#define LED_PIN_GREEN 8  // 초록 LED가 연결된 핀
-#define BUTTON_PIN_1 7  // 첫 번째 버튼 핀
-#define BUTTON_PIN_2 6  // 두 번째 버튼 핀
-#define BUTTON_PIN_3 5  // 세 번째 버튼 핀
+#define LED_R 11  // LED가 연결된 핀
+#define LED_Y 10  // LED가 연결된 핀
+#define LED_G 9  // LED가 연결된 핀
+#define BUTTON1 7
+#define BUTTON2 6
+#define BUTTON3 5
+#define POT A0
+
+int brightness = 0;    // LED 밝기 변수
+int periodRed=2000;
+int periodYel=500;
+int periodGre=2000;
+static bool BlinkG = false;
+volatile bool Normal = true;
+volatile bool Emergency = false;
+volatile bool BlinkAll = false;
+volatile bool PowerOff = false;
+volatile bool button1Pressed = false;
+volatile bool button2Pressed = false;
+volatile bool button3Pressed = false;
 
 Scheduler runner;   // TaskScheduler 객체 생성
 
-void LedOnRed();       // 빨간 LED 켜기 함수
-void LedOffRed();      // 빨간 LED 끄기 함수
-void LedOnYellow();    // 노란 LED 켜기 함수
-void LedOffYellow();   // 노란 LED 끄기 함수
-void LedOnGreen();     // 초록 LED 켜기 함수
-void LedOffGreen();    // 초록 LED 끄기 함수
-void BlinkGreen();     // 초록 LED 깜빡이기 함수
+void Red();       // LED 켜기 함수
+void Yel_1();
+void Gre_1();
+void Gre_2();
+void Yel_2();
 void CheckSerialInput(); // Serial 입력 확인 함수
-void CheckButtonInput(); // 버튼 입력 확인 함수
-void StartRed();       // 빨간 LED 주기를 시작하는 함수
-void LedOnYellow2();   // 노란 LED2 켜기 함수
-void LedOffYellow2();  // 노란 LED2 끄기 함수
-void EmergencyMode();  // Emergency 모드 함수
-void BlinkAllMode();   // Blink All 모드 함수
-void OnOffMode();      // On Off 모드 함수
+void button1_ISR();
+void button2_ISR();
+void button3_ISR();
+void emgc();
+void BlAl();
+void pwof();
+void SendBrightness();
 
-int periodRed = 2000; // 빨간 LED 주기
-int periodYellow = 500; // 노란 LED 주기
-int periodGreen = 2000; // 초록 LED 주기
-
-enum State { NORMAL, EMERGENCY, BLINK_ALL, ON_OFF };
-volatile State currentState = NORMAL;
-
-Task taskRed(periodRed, TASK_ONCE, &LedOnRed,  &runner, true); 
-Task taskYellow(periodYellow, TASK_ONCE, &LedOnYellow,  &runner, false); 
-Task taskGreen(periodGreen, TASK_ONCE, &LedOnGreen,  &runner, false); 
-Task taskBlinkGreen(333, 6, &BlinkGreen, &runner, false); // 1초에 3번 깜빡임
-Task taskYellow2(periodYellow, TASK_ONCE, &LedOnYellow2,  &runner, false);
-Task taskOffYellow2(0, TASK_ONCE, &LedOffYellow2, &runner, false);
-Task taskOffRed(0, TASK_ONCE, &LedOffRed, &runner, false);
-Task taskOffYellow(0, TASK_ONCE, &LedOffYellow, &runner, false);
-Task taskOffGreen(0, TASK_ONCE, &LedOffGreen, &runner, false);
-Task taskStartRed(0, TASK_ONCE, &StartRed, &runner, false); // 빨간 LED 켜기
-Task taskEmergency(0, TASK_FOREVER, &EmergencyMode, &runner, false);
-Task taskBlinkAll(500, TASK_FOREVER, &BlinkAllMode, &runner, false);
-Task taskOnOff(0, TASK_FOREVER, &OnOffMode, &runner, false);
-Task task3(100, TASK_FOREVER, &CheckSerialInput, &runner, true);
-Task taskCheckButton(100, TASK_FOREVER, &CheckButtonInput, &runner, true); // 버튼 입력 확인 Task 추가
+Task LEDR(0, TASK_ONCE, &Red, &runner, true);
+Task LEDY1(0, TASK_ONCE, &Yel_1, &runner, false);
+Task LEDG1(0, TASK_ONCE, &Gre_1, &runner, false);
+Task LEDG2(166, 6, &Gre_2, &runner, false);
+Task LEDY2(0, TASK_ONCE, &Yel_2, &runner, false);
+Task SerialCheck( 100, TASK_FOREVER, &CheckSerialInput, &runner, true);
+Task BlinkAllTask(500, TASK_FOREVER, &BlAl, &runner, false);
+Task BrightnessTask(100, TASK_FOREVER, &SendBrightness, &runner, true);
 
 void setup() {
-    pinMode(LED_PIN_RED, OUTPUT);
-    pinMode(LED_PIN_YELLOW, OUTPUT);
-    pinMode(LED_PIN_GREEN, OUTPUT);
-    pinMode(BUTTON_PIN_1, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_2, INPUT_PULLUP);
-    pinMode(BUTTON_PIN_3, INPUT_PULLUP);
+    pinMode(LED_R, OUTPUT);
+    pinMode(LED_Y, OUTPUT);
+    pinMode(LED_G, OUTPUT);
+    pinMode(BUTTON1, INPUT_PULLUP);
+    pinMode(BUTTON2, INPUT_PULLUP);
+    pinMode(BUTTON3, INPUT_PULLUP);
     Serial.begin(9600);
+
+    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(BUTTON1), button1_ISR, FALLING);
+    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(BUTTON2), button2_ISR, FALLING);
+    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(BUTTON3), button3_ISR, FALLING);
+
 }
 
 void loop() {
+    brightness = analogRead(POT) / 4;
     runner.execute(); // TaskScheduler 실행
+    if (button1Pressed) {
+        button1Pressed = false;
+        LEDG2.setIterations(6);
+        if (Emergency == false) {
+            Emergency = true;
+            Normal = false;
+            BlinkAll = false;
+            PowerOff = false;
+            runner.disableAll();
+            SerialCheck.enable();
+            BrightnessTask.enable();
+            emgc();
+        } else {
+            Emergency = false;
+            Normal = true;
+            Serial.println("Normal Mode");
+            LEDR.restart();
+        }
+    }
+
+    if (button2Pressed) {
+        button2Pressed = false;
+        if (BlinkAll == false) {
+            Emergency = false;
+            Normal = false;
+            BlinkAll = true;
+            PowerOff = false;
+            runner.disableAll();
+            LEDG2.setIterations(0);
+            SerialCheck.enable();
+            BrightnessTask.enable();
+            BlinkAllTask.restart();
+        } else {
+            PowerOff = false;
+            Normal = true;
+            BlinkAllTask.disable();
+            LEDG2.setIterations(6);
+            Serial.println("Normal Mode");
+            analogWrite(LED_R, 0);
+            Serial.println("[" + String(millis()) + "] RED LED OFF");
+            analogWrite(LED_G, 0);
+            Serial.println("[" + String(millis()) + "] GREEN LED OFF");
+            analogWrite(LED_Y, 0);
+            Serial.println("[" + String(millis()) + "] YELLOW LED OFF");
+            LEDR.restart();
+        }
+    }
+
+    if (button3Pressed) {
+        button3Pressed = false;
+        LEDG2.setIterations(6);
+        if (PowerOff == false) {
+            Emergency = false;
+            Normal = false;
+            BlinkAll = false;
+            PowerOff = true;
+            runner.disableAll();
+            SerialCheck.enable();
+            BrightnessTask.enable();
+            pwof();
+        } else {
+            PowerOff = false;
+            Normal = true;
+            Serial.println("Normal Mode");
+            LEDR.restart();
+        }
+    }
+
 }
 
-void LedOnRed() {
+void Red() {
+    Serial.println("[" + String(millis()) + "] YELLOW LED OFF");
+    analogWrite(LED_Y, 0);
     Serial.println("[" + String(millis()) + "] RED LED ON");
-    digitalWrite(LED_PIN_RED, HIGH);
-    taskOffRed.restartDelayed(periodRed);
-    taskYellow.restartDelayed(periodRed); // 노란 LED 켜기
+    analogWrite(LED_R, brightness);
+    LEDY1.restartDelayed(periodRed);
 }
 
-void LedOffRed() {
+void Yel_1() {
     Serial.println("[" + String(millis()) + "] RED LED OFF");
-    digitalWrite(LED_PIN_RED, LOW);
-}
-
-void LedOnYellow() {
+    analogWrite(LED_R, 0);
     Serial.println("[" + String(millis()) + "] YELLOW LED ON");
-    digitalWrite(LED_PIN_YELLOW, HIGH);
-    taskOffYellow.restartDelayed(periodYellow);
-    taskGreen.restartDelayed(periodYellow); // 초록 LED 켜기
+    analogWrite(LED_Y, brightness);
+    LEDG1.restartDelayed(periodYel);
 }
 
-void LedOffYellow() {
+void Gre_1() {
     Serial.println("[" + String(millis()) + "] YELLOW LED OFF");
-    digitalWrite(LED_PIN_YELLOW, LOW);
-}
-
-void LedOnGreen() {
+    analogWrite(LED_Y, 0);
     Serial.println("[" + String(millis()) + "] GREEN LED ON");
-    digitalWrite(LED_PIN_GREEN, HIGH);
-    taskOffGreen.restartDelayed(periodGreen);
-    taskBlinkGreen.restartDelayed(periodGreen); // 초록 LED 깜빡이기 시작
+    analogWrite(LED_G, brightness);
+    BlinkG = true;
+    LEDG2.restartDelayed(periodGre);
 }
 
-void LedOffGreen() {
-    Serial.println("[" + String(millis()) + "] GREEN LED OFF");
-    digitalWrite(LED_PIN_GREEN, LOW);
-}
-
-void BlinkGreen() {
-    static bool isOn = false;
-    if (isOn) {
+void Gre_2(){
+    if(BlinkG == true){
+        analogWrite(LED_G, 0);
         Serial.println("[" + String(millis()) + "] GREEN LED OFF");
-        digitalWrite(LED_PIN_GREEN, LOW);
-    } else {
+        BlinkG = false;
+    }
+    else{
+        analogWrite(LED_G, brightness);
         Serial.println("[" + String(millis()) + "] GREEN LED ON");
-        digitalWrite(LED_PIN_GREEN, HIGH);
+        BlinkG = true;
     }
-    isOn = !isOn;
-    if (taskBlinkGreen.isLastIteration()) {
-        digitalWrite(LED_PIN_GREEN, LOW);
-        taskYellow2.restartDelayed(0); // 노란 LED 켜기
+    if (LEDG2.isLastIteration()) {
+        LEDY2.restartDelayed(170); // 노란 LED 켜기
     }
 }
 
-void LedOnYellow2() {
+void Yel_2() {
+    analogWrite(LED_G, 0);
+    Serial.println("[" + String(millis()) + "] GREEN LED OFF");
+    analogWrite(LED_Y, brightness);
     Serial.println("[" + String(millis()) + "] YELLOW LED ON");
-    digitalWrite(LED_PIN_YELLOW, HIGH);
-    taskOffYellow2.restartDelayed(periodYellow);
-}
-
-void LedOffYellow2() {
-    Serial.println("[" + String(millis()) + "] YELLOW LED OFF");
-    digitalWrite(LED_PIN_YELLOW, LOW);
-    taskRed.restartDelayed(0); // 빨간 LED 켜기
-}
-
-void StartRed() {
-    taskRed.restart();
-}
-
-void EmergencyMode() {
-    Serial.println("EMERGENCY MODE");
-    digitalWrite(LED_PIN_RED, HIGH);
-    digitalWrite(LED_PIN_YELLOW, LOW);
-    digitalWrite(LED_PIN_GREEN, LOW);
-    Serial.println("RED LED ON");
-    Serial.println("YELLOW LED OFF");
-    Serial.println("GREEN LED OFF");
-}
-
-void BlinkAllMode() {
-    static bool isOn = false;
-    if (isOn) {
-        Serial.println("BLINK ALL OFF");
-        digitalWrite(LED_PIN_RED, LOW);
-        digitalWrite(LED_PIN_YELLOW, LOW);
-        digitalWrite(LED_PIN_GREEN, LOW);
-        Serial.println("RED LED OFF");
-        Serial.println("YELLOW LED OFF");
-        Serial.println("GREEN LED OFF");
-    } else {
-        Serial.println("BLINK ALL ON");
-        digitalWrite(LED_PIN_RED, HIGH);
-        digitalWrite(LED_PIN_YELLOW, HIGH);
-        digitalWrite(LED_PIN_GREEN, HIGH);
-        Serial.println("RED LED ON");
-        Serial.println("YELLOW LED ON");
-        Serial.println("GREEN LED ON");
-    }
-    isOn = !isOn;
-}
-
-void OnOffMode() {
-    Serial.println("ON OFF MODE");
-    digitalWrite(LED_PIN_RED, LOW);
-    digitalWrite(LED_PIN_YELLOW, LOW);
-    digitalWrite(LED_PIN_GREEN, LOW);
-    Serial.println("RED LED OFF");
-    Serial.println("YELLOW LED OFF");
-    Serial.println("GREEN LED OFF");
+    BlinkG = false;
+    LEDR.restartDelayed(periodYel);
 }
 
 void CheckSerialInput() {
     if (Serial.available() > 0) {
         String input = Serial.readStringUntil('\n');
-        int newPeriod = input.substring(1).toInt();
-        if (newPeriod > 0) {
-            if (input.startsWith("R")) {
-                periodRed = newPeriod;
-                taskRed.setInterval(periodRed);
-                Serial.println("[" + String(millis()) + "] New RED task period: " + newPeriod);
-            } else if (input.startsWith("Y")) {
-                periodYellow = newPeriod;
-                taskYellow.setInterval(periodYellow);
-                taskYellow2.setInterval(periodYellow);
-                Serial.println("[" + String(millis()) + "] New YELLOW task period: " + newPeriod);
-            } else if (input.startsWith("G")) {
-                periodGreen = newPeriod;
-                taskGreen.setInterval(periodGreen);
-                Serial.println("[" + String(millis()) + "] New GREEN task period: " + newPeriod);
+        input.trim(); // 공백 및 개행 문자 제거
+
+        if (input.length() > 1) { // 최소한 R/Y/G + 숫자 한 자리 이상 필요
+            char type = input.charAt(0); // 첫 번째 문자 추출
+            int value = input.substring(1).toInt(); // 숫자 부분 변환
+
+            if (value > 0) { // 유효한 값인지 확인
+                if (type == 'R') {
+                    periodRed = value;
+                    Serial.println("[" + String(millis()) + "] New periodRed: " + value);
+                } else if (type == 'Y') {
+                    periodYel = value;
+                    Serial.println("[" + String(millis()) + "] New periodYel: " + value);
+                } else if (type == 'G') {
+                    periodGre = value;
+                    Serial.println("[" + String(millis()) + "] New periodGre: " + value);
+                }
             }
         }
     }
 }
 
-void CheckButtonInput() {
-    static unsigned long lastDebounceTime = 0;
-    unsigned long debounceDelay = 200;
+void button1_ISR(){
+    button1Pressed = true;
+}
+void button2_ISR(){
+    button2Pressed = true;
+}
+void button3_ISR(){
+    button3Pressed = true;
+}
 
-    if ((millis() - lastDebounceTime) > debounceDelay) {
-        if (digitalRead(BUTTON_PIN_1) == LOW) {
-            if (currentState == EMERGENCY) {
-                currentState = NORMAL;
-                Serial.println("RETURN TO NORMAL");
-                digitalWrite(LED_PIN_RED, LOW);
-                digitalWrite(LED_PIN_YELLOW, LOW);
-                digitalWrite(LED_PIN_GREEN, LOW);
-                taskEmergency.disable();
-                taskRed.disable();
-                taskYellow.disable();
-                taskGreen.disable();
-                taskBlinkGreen.disable();
-                taskYellow2.disable();
-                taskOffYellow2.disable();
-                taskOffRed.disable();
-                taskOffYellow.disable();
-                taskOffGreen.disable();
-                taskStartRed.disable();
-                taskRed.enable();
-                taskRed.restart();
-            } else {
-                currentState = EMERGENCY;
-                Serial.println("EMERGENCY");
-                taskEmergency.enable();
-                taskBlinkAll.disable();
-                taskOnOff.disable();
-                taskRed.disable();
-                taskYellow.disable();
-                taskGreen.disable();
-                taskBlinkGreen.disable();
-                taskYellow2.disable();
-                taskOffYellow2.disable();
-                taskOffRed.disable();
-                taskOffYellow.disable();
-                taskOffGreen.disable();
-                taskStartRed.disable();
-                taskEmergency.restart();
-            }
-            lastDebounceTime = millis();
-        } else if (digitalRead(BUTTON_PIN_2) == LOW) {
-            if (currentState == BLINK_ALL) {
-                currentState = NORMAL;
-                Serial.println("RETURN TO NORMAL");
-                digitalWrite(LED_PIN_RED, LOW);
-                digitalWrite(LED_PIN_YELLOW, LOW);
-                digitalWrite(LED_PIN_GREEN, LOW);
-                taskBlinkAll.disable();
-                taskRed.disable();
-                taskYellow.disable();
-                taskGreen.disable();
-                taskBlinkGreen.disable();
-                taskYellow2.disable();
-                taskOffYellow2.disable();
-                taskOffRed.disable();
-                taskOffYellow.disable();
-                taskOffGreen.disable();
-                taskStartRed.disable();
-                taskRed.enable();
-                taskRed.restart();
-            } else {
-                currentState = BLINK_ALL;
-                Serial.println("BLINK ALL");
-                taskEmergency.disable();
-                taskBlinkAll.enable();
-                taskOnOff.disable();
-                taskRed.disable();
-                taskYellow.disable();
-                taskGreen.disable();
-                taskBlinkGreen.disable();
-                taskYellow2.disable();
-                taskOffYellow2.disable();
-                taskOffRed.disable();
-                taskOffYellow.disable();
-                taskOffGreen.disable();
-                taskStartRed.disable();
-                taskBlinkAll.restart();
-            }
-            lastDebounceTime = millis();
-        } else if (digitalRead(BUTTON_PIN_3) == LOW) {
-            if (currentState == ON_OFF) {
-                currentState = NORMAL;
-                Serial.println("RETURN TO NORMAL");
-                digitalWrite(LED_PIN_RED, LOW);
-                digitalWrite(LED_PIN_YELLOW, LOW);
-                digitalWrite(LED_PIN_GREEN, LOW);
-                taskOnOff.disable();
-                taskRed.disable();
-                taskYellow.disable();
-                taskGreen.disable();
-                taskBlinkGreen.disable();
-                taskYellow2.disable();
-                taskOffYellow2.disable();
-                taskOffRed.disable();
-                taskOffYellow.disable();
-                taskOffGreen.disable();
-                taskStartRed.disable();
-                taskRed.enable();
-                taskRed.restart();
-            } else {
-                currentState = ON_OFF;
-                Serial.println("ON OFF");
-                taskEmergency.disable();
-                taskBlinkAll.disable();
-                taskOnOff.enable();
-                taskRed.disable();
-                taskYellow.disable();
-                taskGreen.disable();
-                taskBlinkGreen.disable();
-                taskYellow2.disable();
-                taskOffYellow2.disable();
-                taskOffRed.disable();
-                taskOffYellow.disable();
-                taskOffGreen.disable();
-                taskStartRed.disable();
-                taskOnOff.restart();
-            }
-            lastDebounceTime = millis();
-        }
+void emgc(){
+    Serial.println("Emergency Mode");
+    analogWrite(LED_Y, 0);
+    Serial.println("[" + String(millis()) + "] YELLOW LED OFF");
+    analogWrite(LED_G, 0);
+    Serial.println("[" + String(millis()) + "] GREEN LED OFF");
+    analogWrite(LED_R, brightness);
+    Serial.println("[" + String(millis()) + "] RED LED ON");
+}
+
+void pwof(){
+    Serial.println("PowerOff Mode");
+    analogWrite(LED_Y, 0);
+    Serial.println("[" + String(millis()) + "] YELLOW LED OFF");
+    analogWrite(LED_G, 0);
+    Serial.println("[" + String(millis()) + "] GREEN LED OFF");
+    analogWrite(LED_R, 0);
+    Serial.println("[" + String(millis()) + "] RED LED OFF");
+}
+
+void BlAl(){
+    Serial.println("BlinkAll Mode");
+    static bool HL = false;
+    if(HL == false){
+        analogWrite(LED_Y, brightness);
+        Serial.println("[" + String(millis()) + "] YELLOW LED ON");
+        analogWrite(LED_G, brightness);
+        Serial.println("[" + String(millis()) + "] GREEN LED ON");
+        analogWrite(LED_R, brightness);
+        Serial.println("[" + String(millis()) + "] RED LED ON");
+        HL = true;
     }
+    else{
+        analogWrite(LED_Y, 0);
+        Serial.println("[" + String(millis()) + "] YELLOW LED OFF");
+        analogWrite(LED_G, 0);
+        Serial.println("[" + String(millis()) + "] GREEN LED OFF");
+        analogWrite(LED_R, 0);
+        Serial.println("[" + String(millis()) + "] RED LED OFF");
+        HL = false;
+    }
+}
+
+void SendBrightness() {
+    Serial.println("Brightness: " + String(brightness));
 }
